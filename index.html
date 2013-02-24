@@ -1,0 +1,379 @@
+<html>
+<head>
+<title>Low-Pixel 3D</title>
+</head>
+
+<script type='text/javascript' src='GL/utils/gl-matrix.js'></script>
+<script type='text/javascript' src='GL/utils/webgl-utils.js'></script>
+<script type='text/javascript' src='GL/GLMan.js'></script>
+<script type='text/javascript' src='GL/XGLProgram.js'></script>
+<script type='text/javascript' src='GL/GeoGLProgram.js'></script>
+<script type='text/javascript' src='GL/LowResTexGLProgram.js'></script>
+<script type='text/javascript' src='GL/HighResTexGLProgram.js'></script>
+<script type='text/javascript' src='GL/HudGLProgram.js'></script>
+<script type='text/javascript' src='GL/XGLGeo.js'></script>
+<script type='text/javascript' src='GL/XGLLight.js'></script>
+<script type='text/javascript' src='GL/TileGLGeo.js'></script>
+<script type='text/javascript' src='utils/AsyncLoaderMan.js'></script>
+<script type='text/javascript' src='utils/InputMan.js'></script>
+
+<script type='text/javascript'>
+//Managers
+var alm;//AsyncLoadMan
+var glm;//GLMan
+var im;//InputMan
+
+//Geometry
+var arms;
+var room;
+var street;
+var ball;
+var lightbox1;
+var lightbox2;
+var light1;
+var light2;
+var xplane;
+var yplane;
+var zplane;
+var clipscreen;
+var tile;
+var fps10;
+var fps1;
+
+//Gameplay variables
+var clock;
+var stamps = [];
+
+function loadContent()
+{
+  //Init the men
+  alm = new AsyncLoaderMan();
+  glm = new GLMan(640, 320);
+  im = new InputMan();
+
+  //Load the shaders
+  alm.loadBatch(new AsyncLoaderBatch(
+    ['assets/shaders/geovshader.txt',
+    'assets/shaders/geofshader.txt',
+    'assets/shaders/lrtvshader.txt',
+    'assets/shaders/lrtfshader.txt',
+    'assets/shaders/hrtvshader.txt',
+    'assets/shaders/hrtfshader.txt',
+    'assets/shaders/hudvshader.txt',
+    'assets/shaders/hudfshader.txt'],
+    ['geovs','geofs','lrtvs','lrtfs','hrtvs','hrtfs','hudvs','hudfs'], 
+    compileShaderDataFromFiles));
+}
+
+function compileShaderDataFromFiles(returnObj)
+{
+  if(!returnObj) { alert('Error loading Shaders... :/'); return; }
+
+  //Positioning of the canvas on the DOM
+  document.getElementById('render_area').insertBefore(glm.canvas,document.getElementById('shadow'));
+
+  //Use the shaders
+  glm.setProgram("geo",returnObj.geovs,returnObj.geofs);
+  glm.setProgram("lrt",returnObj.lrtvs,returnObj.lrtfs);
+  glm.setProgram("hrt",returnObj.hrtvs,returnObj.hrtfs);
+  glm.setProgram("hud",returnObj.hudvs,returnObj.hudfs);
+
+  //Now that the shaders are ready, load the gometry
+  //(Probably should start loading these immediately, and then just wait to use them until the shaders are ready, 
+  //but they're lightweight enough that it shouldn't really matter. Plus, they're probably already cached)
+  alm.loadBatch(new AsyncLoaderBatch(
+    ['assets/geometry/arms.json',
+    'assets/geometry/room.json',
+    'assets/geometry/street.json',
+    'assets/geometry/ball.json',
+    'assets/geometry/lightbox.json',
+    'assets/geometry/plane.json',
+    'assets/geometry/clipscreen.json',
+    'assets/geometry/tile.json',
+    'assets/geometry/tile2x.json'],
+    ['arms','room','street','ball','lightbox','plane','clipscreen','tile','tile2x'], 
+    compileGeoDataFromFiles));
+}
+
+function compileGeoDataFromFiles(returnObj)
+{
+  if(!returnObj) { alert('Error loading Geometry... :/'); return; }
+
+  //Use the Geometry
+  var armsData = JSON.parse(returnObj.arms);
+  arms = new XGLGeo(armsData.verts, armsData.colors, armsData.normals, armsData.indexes);
+  glm.geoProgram.addGeo(arms);
+  arms.mPush();
+
+  var roomData = JSON.parse(returnObj.room);
+  room = new XGLGeo(roomData.verts, roomData.colors, roomData.normals, roomData.indexes);
+  //glm.geoProgram.addGeo(room);
+
+  var streetData = JSON.parse(returnObj.street);
+  street = new XGLGeo(streetData.verts, streetData.colors, streetData.normals, streetData.indexes);
+  glm.geoProgram.addGeo(street);
+
+  var ballData = JSON.parse(returnObj.ball);
+  ball = new XGLGeo(ballData.verts, ballData.colors, ballData.normals, ballData.indexes);
+  //glm.geoProgram.addGeo(ball);
+
+  var lightboxData = JSON.parse(returnObj.lightbox);
+  lightbox1 = new XGLGeo(lightboxData.verts, lightboxData.colors, lightboxData.normals, lightboxData.indexes);
+  glm.geoProgram.addGeo(lightbox1);
+
+  lightboxData = JSON.parse(returnObj.lightbox);
+  lightbox2 = new XGLGeo(lightboxData.verts, lightboxData.colors, lightboxData.normals, lightboxData.indexes);
+  glm.geoProgram.addGeo(lightbox2);
+
+  var planeData = JSON.parse(returnObj.plane);
+  xplane = new XGLGeo(planeData.verts, planeData.colors, planeData.normals, planeData.indexes);
+  //glm.geoProgram.addGeo(xplane);
+  xplane.mPush();
+  mat4.translate(xplane.mMat,[-2.0,0.0,0.0]);
+  mat4.rotate(xplane.mMat,3.14159265358979,[1.0,0.0,0.0]);
+
+  yplane = new XGLGeo(planeData.verts, planeData.colors, planeData.normals, planeData.indexes);
+  //glm.geoProgram.addGeo(yplane);
+  yplane.mPush();
+  mat4.translate(yplane.mMat,[2.0,0.0,0.0]);
+  mat4.rotate(xplane.mMat,3.14159265358979,[0.0,1.0,0.0]);
+
+  zplane = new XGLGeo(planeData.verts, planeData.colors, planeData.normals, planeData.indexes);
+  //glm.geoProgram.addGeo(zplane);
+  zplane.mPush();
+  mat4.translate(zplane.mMat,[0.0,0.0,0.0]);
+  mat4.rotate(xplane.mMat,3.14159265358979,[0.0,0.0,1.0]);
+
+  var hrClipscreenData = JSON.parse(returnObj.clipscreen);
+  clipscreen = new XGLGeo(hrClipscreenData.verts, hrClipscreenData.colors, hrClipscreenData.normals, hrClipscreenData.indexes);
+  glm.hrtProgram.addGeo(clipscreen);
+
+  var lrClipscreenData = JSON.parse(returnObj.clipscreen);
+  clipscreen = new XGLGeo(lrClipscreenData.verts, lrClipscreenData.colors, lrClipscreenData.normals, lrClipscreenData.indexes);
+  glm.lrtProgram.addGeo(clipscreen);
+
+  var tileData = JSON.parse(returnObj.tile);
+  fps10 = TileGLGeo(tileData.verts, tileData.colors, tileData.normals, tileData.indexes);
+  fps10.tileIndex = 0;
+  fps10.position(-1.0+fps10.bgPixelWidth,-1.0+(fps10.tileHeight+fps10.bgPixelHeight));
+  glm.hudProgram.addGeo(fps10);
+  tileData = JSON.parse(returnObj.tile);
+  fps1 = TileGLGeo(tileData.verts, tileData.colors, tileData.normals, tileData.indexes);
+  fps1.tileIndex = 0;
+  fps1.position(-1.0+fps1.bgPixelWidth+fps1.textTileWidth,-1.0+(fps1.tileHeight+fps1.bgPixelHeight));
+  glm.hudProgram.addGeo(fps1);
+  tileData = JSON.parse(returnObj.tile);
+  tile = TileGLGeo(tileData.verts, tileData.colors, tileData.normals, tileData.indexes);
+  tile.tileIndex = tile.icons['alphanum']['f'];
+  tile.position(-1.0+tile.bgPixelWidth+(2*tile.textTileWidth),-1.0+(tile.tileHeight+tile.bgPixelHeight));
+  glm.hudProgram.addGeo(tile);
+  tileData = JSON.parse(returnObj.tile);
+  tile = TileGLGeo(tileData.verts, tileData.colors, tileData.normals, tileData.indexes);
+  tile.tileIndex = tile.icons['alphanum']['p'];
+  tile.position(-1.0+tile.bgPixelWidth+(3*tile.textTileWidth),-1.0+(tile.tileHeight+tile.bgPixelHeight));
+  glm.hudProgram.addGeo(tile);
+  tileData = JSON.parse(returnObj.tile);
+  tile = TileGLGeo(tileData.verts, tileData.colors, tileData.normals, tileData.indexes);
+  tile.tileIndex = tile.icons['alphanum']['s'];
+  tile.position(-1.0+tile.bgPixelWidth+(4*tile.textTileWidth),-1.0+(tile.tileHeight+tile.bgPixelHeight));
+  glm.hudProgram.addGeo(tile);
+  tileData = JSON.parse(returnObj.tile);
+  tile = TileGLGeo(tileData.verts, tileData.colors, tileData.normals, tileData.indexes);
+  tile.tileIndex = tile.icons['icon']['heart'];
+  tile.position(1.0-tile.bgPixelWidth-tile.tileWidth,-1+tile.bgPixelHeight+tile.tileHeight);
+  glm.hudProgram.addGeo(tile);
+  tileData = JSON.parse(returnObj.tile);
+  tile = TileGLGeo(tileData.verts, tileData.colors, tileData.normals, tileData.indexes);
+  tile.tileIndex = tile.icons['icon']['heart'];
+  tile.position(1.0-tile.bgPixelWidth-tile.tileWidth-tile.textTileWidth,-1+tile.bgPixelHeight+tile.tileHeight);
+  glm.hudProgram.addGeo(tile);
+  tileData = JSON.parse(returnObj.tile);
+  tile = TileGLGeo(tileData.verts, tileData.colors, tileData.normals, tileData.indexes);
+  tile.tileIndex = tile.icons['icon']['heart'];
+  tile.position(1.0-tile.bgPixelWidth-tile.tileWidth-(2*tile.textTileWidth),-1+tile.bgPixelHeight+tile.tileHeight);
+  glm.hudProgram.addGeo(tile);
+  tileData = JSON.parse(returnObj.tile);
+  tile = TileGLGeo(tileData.verts, tileData.colors, tileData.normals, tileData.indexes);
+  tile.tileIndex = tile.icons['icon']['skull'];
+  tile.position(1.0-tile.bgPixelWidth-tile.tileWidth-(2*tile.textTileWidth),-1+tile.bgPixelHeight+(2*tile.tileHeight)+tile.pixelHeight);
+  glm.hudProgram.addGeo(tile);
+  tileData = JSON.parse(returnObj.tile);
+  tile = TileGLGeo(tileData.verts, tileData.colors, tileData.normals, tileData.indexes);
+  tile.tileIndex = 0;
+  tile.position(1.0-tile.bgPixelWidth-tile.tileWidth-tile.textTileWidth,-1+tile.bgPixelHeight+(2*tile.tileHeight)+tile.pixelHeight);
+  glm.hudProgram.addGeo(tile);
+  tileData = JSON.parse(returnObj.tile);
+  tile = TileGLGeo(tileData.verts, tileData.colors, tileData.normals, tileData.indexes);
+  tile.tileIndex = 0;
+  tile.position(1.0-tile.bgPixelWidth-tile.tileWidth,-1+tile.bgPixelHeight+(2*tile.tileHeight)+tile.pixelHeight);
+  glm.hudProgram.addGeo(tile);
+
+/*
+  var tileData = JSON.parse(returnObj.tile2x);
+  fps10 = TileGLGeo(tileData.verts, tileData.colors, tileData.normals, tileData.indexes);
+  fps10.tileIndex = 0;
+  fps10.position(-1.0+fps10.bgPixelWidth,-1.0+((2*fps10.tileHeight)+fps10.bgPixelHeight));
+  glm.hudProgram.addGeo(fps10);
+  tileData = JSON.parse(returnObj.tile2x);
+  fps1 = TileGLGeo(tileData.verts, tileData.colors, tileData.normals, tileData.indexes);
+  fps1.tileIndex = 0;
+  fps1.position(-1.0+fps1.bgPixelWidth+(2*fps1.textTileWidth),-1.0+((2*fps1.tileHeight)+fps1.bgPixelHeight));
+  glm.hudProgram.addGeo(fps1);
+  tileData = JSON.parse(returnObj.tile2x);
+  tile = TileGLGeo(tileData.verts, tileData.colors, tileData.normals, tileData.indexes);
+  tile.tileIndex = tile.icons['alphanum']['f'];
+  tile.position(-1.0+tile.bgPixelWidth+(2*(2*tile.textTileWidth)),-1.0+((2*tile.tileHeight)+tile.bgPixelHeight));
+  glm.hudProgram.addGeo(tile);
+  tileData = JSON.parse(returnObj.tile2x);
+  tile = TileGLGeo(tileData.verts, tileData.colors, tileData.normals, tileData.indexes);
+  tile.tileIndex = tile.icons['alphanum']['p'];
+  tile.position(-1.0+tile.bgPixelWidth+(3*(2*tile.textTileWidth)),-1.0+((2*tile.tileHeight)+tile.bgPixelHeight));
+  glm.hudProgram.addGeo(tile);
+  tileData = JSON.parse(returnObj.tile2x);
+  tile = TileGLGeo(tileData.verts, tileData.colors, tileData.normals, tileData.indexes);
+  tile.tileIndex = tile.icons['alphanum']['s'];
+  tile.position(-1.0+tile.bgPixelWidth+(4*(2*tile.textTileWidth)),-1.0+((2*tile.tileHeight)+tile.bgPixelHeight));
+  glm.hudProgram.addGeo(tile);
+  tileData = JSON.parse(returnObj.tile2x);
+  tile = TileGLGeo(tileData.verts, tileData.colors, tileData.normals, tileData.indexes);
+  tile.tileIndex = tile.icons['icon']['heart'];
+  tile.position(1.0-tile.bgPixelWidth-(2*tile.tileWidth),-1+tile.bgPixelHeight+(2*tile.tileHeight));
+  glm.hudProgram.addGeo(tile);
+  tileData = JSON.parse(returnObj.tile2x);
+  tile = TileGLGeo(tileData.verts, tileData.colors, tileData.normals, tileData.indexes);
+  tile.tileIndex = tile.icons['icon']['heart'];
+  tile.position(1.0-tile.bgPixelWidth-(2*tile.tileWidth)-(2*tile.textTileWidth),-1+tile.bgPixelHeight+(2*tile.tileHeight));
+  glm.hudProgram.addGeo(tile);
+  tileData = JSON.parse(returnObj.tile2x);
+  tile = TileGLGeo(tileData.verts, tileData.colors, tileData.normals, tileData.indexes);
+  tile.tileIndex = tile.icons['icon']['heart'];
+  tile.position(1.0-tile.bgPixelWidth-(2*tile.tileWidth)-(2*(2*tile.textTileWidth)),-1+tile.bgPixelHeight+(2*tile.tileHeight));
+  glm.hudProgram.addGeo(tile);
+  tileData = JSON.parse(returnObj.tile2x);
+  tile = TileGLGeo(tileData.verts, tileData.colors, tileData.normals, tileData.indexes);
+  tile.tileIndex = tile.icons['icon']['skull'];
+  tile.position(1.0-tile.bgPixelWidth-(2*tile.tileWidth)-(2*(2*tile.textTileWidth)),-1+tile.bgPixelHeight+(2*(2*tile.tileHeight))+(2*tile.pixelHeight));
+  glm.hudProgram.addGeo(tile);
+  tileData = JSON.parse(returnObj.tile2x);
+  tile = TileGLGeo(tileData.verts, tileData.colors, tileData.normals, tileData.indexes);
+  tile.tileIndex = 0;
+  tile.position(1.0-tile.bgPixelWidth-(2*tile.tileWidth)-(2*tile.textTileWidth),-1+tile.bgPixelHeight+(2*(2*tile.tileHeight))+(2*tile.pixelHeight));
+  glm.hudProgram.addGeo(tile);
+  tileData = JSON.parse(returnObj.tile2x);
+  tile = TileGLGeo(tileData.verts, tileData.colors, tileData.normals, tileData.indexes);
+  tile.tileIndex = 0;
+  tile.position(1.0-tile.bgPixelWidth-(2*tile.tileWidth),-1+tile.bgPixelHeight+(2*(2*tile.tileHeight))+(2*tile.pixelHeight));
+  glm.hudProgram.addGeo(tile);
+*/
+
+  var tile2xData = JSON.parse(returnObj.tile2x);
+  tile2x = TileGLGeo(tile2xData.verts, tile2xData.colors, tile2xData.normals, tile2xData.indexes);
+  tile2x.tileIndex = 1;
+  //glm.hudProgram.addGeo(tile2x);
+
+  light1 = glm.geoProgram.addLight(new XGLLight([0,0,0]));
+  light2 = glm.geoProgram.addLight(new XGLLight([0,0,0]));
+  light3 = glm.geoProgram.addLight(new XGLLight([5,2,0]));
+
+  var tileTex = new Image();
+  tileTex.onload = function() { compileTextureDataFromFiles(tileTex); };
+  tileTex.src = "assets/images/tiles.png";
+}
+
+function compileTextureDataFromFiles(img)
+{
+  glm.hudProgram.initTexture(img);
+
+  glm.geoProgram.compileStaticData();
+  glm.lrtProgram.compileStaticData();
+  glm.hrtProgram.compileStaticData();
+  glm.hudProgram.compileStaticData();
+
+  init();
+}
+
+function init()
+{
+  //Init game variables
+  clock = 0;
+  stamps[0] = new Date().getTime();
+  stamps[1] = new Date().getTime();
+
+  //Move the camera a bit
+  mat4.translate(glm.geoProgram.camMatData,[0,0,10.0]);
+  mat4.translate(arms.mMat,[0,0,10.0]);
+
+  //Start the clock
+  requestAnimFrame(tick,glm.canvas);
+}
+
+function tick()
+{
+  //Not sure if this ought to be at the end or beginning of this function...
+  requestAnimFrame(tick,glm.canvas);
+
+  //Read input/Move the 'player' (aka 'camera')
+  if(im.up || im.w) { mat4.translate(glm.geoProgram.camMatData,[0,0,-0.3]); mat4.translate(arms.mMat,[0,0,-0.3]); }
+  if(im.down || im.s) { mat4.translate(glm.geoProgram.camMatData,[0,0,0.3]); mat4.translate(arms.mMat,[0,0,0.3]);}
+  if(im.a) { mat4.translate(glm.geoProgram.camMatData,[-0.3,0,0]); mat4.translate(arms.mMat,[-0.3,0,0]); }
+  if(im.d) { mat4.translate(glm.geoProgram.camMatData,[0.3,0,0]); mat4.translate(arms.mMat,[0.3,0,0]); }
+  if(im.left) { mat4.rotate(glm.geoProgram.camMatData,0.03,[0,1,0]); mat4.rotate(arms.mMat,0.03,[0,1,0]); }
+  if(im.right) { mat4.rotate(glm.geoProgram.camMatData,-0.03,[0,1,0]); mat4.rotate(arms.mMat,-0.03,[0,1,0]); }
+
+  //Move the light
+  lightbox1.mPush();
+  mat4.translate(lightbox1.mMat,[Math.sin((clock+50)/20)*3,Math.cos((clock+50)/30)*3,Math.sin((clock+50)/10)*3]);
+  light1.setPosition(Math.sin((clock+50)/20)*3,Math.cos((clock+50)/30)*3,Math.sin((clock+50)/10)*3);
+
+  lightbox2.mPush();
+  mat4.translate(lightbox2.mMat,[Math.sin(clock/20)*3,Math.cos(clock/30)*3,Math.sin(clock/10)*3]);
+  light2.setPosition(Math.sin(clock/20)*3,Math.cos(clock/30)*3,Math.sin(clock/10)*3);
+
+  //Move the arms
+  arms.mPush();
+  mat4.translate(arms.mMat,[0.0,Math.sin(clock/100)/10,0.0]);
+
+  //Move the ball
+  //ball.mPush();
+  //mat4.rotate(ball.mMat,clock/10,[0.0,1.0,0.0]);
+
+  //Rotate the planes
+  //xplane.mPush();
+  //mat4.rotate(xplane.mMat,clock/100,[0.0,0.0,1.0]);
+  //yplane.mPush();
+  //mat4.rotate(yplane.mMat,clock/100,[1.0,0.0,0.0]);
+  //zplane.mPush();
+  //mat4.rotate(zplane.mMat,clock/100,[0.0,1.0,0.0]);
+  
+  //Render the updated data
+  glm.draw();
+
+  //Pop the matrices (NOTE- ONLY DO AFTER DRAWING!)
+  lightbox1.mPop();
+  lightbox2.mPop();
+  arms.mPop();
+  //ball.mPop();
+  //xplane.mPop();
+  //yplane.mPop();
+  //zplane.mPop();
+
+  //Check framerate every 9 frames
+  if(clock%9 == 0)
+  {
+    stamps[clock%2] = new Date().getTime();
+    var fps = Math.round((1000/((stamps[clock%2] - stamps[++clock%2])/9)));
+    fps1.tileIndex = fps%10;
+    fps10.tileIndex = (fps-fps1.tileIndex)/10;
+  }
+  else
+    clock++;
+}
+
+window.addEventListener('load', loadContent, false);
+</script>
+<body style='background-color:#252529'>
+<div id='render_area' style='width:640px; margin:10px auto; position:relative; top:50px;'>
+  <img id='shadow' src='assets/images/shadow.png' style='display:block;'></img>
+</div>
+</body>
+</html>
